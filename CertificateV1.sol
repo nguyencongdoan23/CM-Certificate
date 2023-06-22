@@ -28,16 +28,22 @@ contract CertificateV1 {
     mapping (uint => Admin) internal _mpAdminDetails;
 
     Person[] internal _persons;
-    mapping (uint => Person) public _mpPersonDetails;
+    // PersonId => Person
+    mapping (uint => Person) internal _mpPersonDetails;
 
-    Certificate[] public _certificates;
-    mapping (uint => Certificate) public _mpCertificateDetails;
+    Certificate[] internal _certificates;
+    // CertificateId => Certificate
+    mapping (uint => Certificate) internal _mpCertificateDetails;
 
-    mapping(uint => Certificate[]) public _mpCertificateOfPersons;
+    // certificateId => personId
+    mapping (uint => uint) internal _mpCertificateIdToPersonId;
 
-    uint private _idPersonCount = 0;
+    // PersonId => Certificate
+    mapping(uint => Certificate[]) internal _mpCertificateOfPersons;
+
+    uint private _personIdCount = 0;
     uint private _idAdminCount = 0;
-    uint private _idCertificateCount = 0;
+    uint private _certificateIdCount = 0;
 
     constructor() {
         _owner = msg.sender;
@@ -53,13 +59,13 @@ contract CertificateV1 {
         _;
     }
 
-    modifier isAdminExist(uint idAdmin) {
-        require(_isAdminExist(idAdmin), "Admin not found by id!");
+    modifier isPersonExist(uint personId) {
+        require(_isPersonExist(personId), "Person not found by id!");
         _;
     }
 
-    modifier isPersonExist(uint idPerson) {
-        require(_isPersonExist(idPerson), "Person not found by id!");
+    modifier checkCertificateExistOfPerson(uint certificateId) {
+        require(_checkCertificateExistOfPerson(certificateId), "Certificate has been used!");
         _;
     }
 
@@ -71,13 +77,13 @@ contract CertificateV1 {
 
     // Person
     function addPerson(string memory name, string memory email, string memory birthday, address addr) public onlyAdmin {
-        Person memory _newPerson = Person(++_idPersonCount, name, email, birthday, addr);  
+        Person memory _newPerson = Person(++_personIdCount, name, email, birthday, addr);  
         _persons.push(_newPerson);
         
-        _mpPersonDetails[_idPersonCount] = _newPerson;
+        _mpPersonDetails[_personIdCount] = _newPerson;
     }
 
-    function updatePerson(uint id, string memory name, string memory email, string memory birthday, address addr) public onlyAdmin isPersonExist(id) {
+    function updatePerson(uint id, string memory name, string memory email, string memory birthday, address addr) public onlyAdmin {
         uint index = getIndexPersonById(id);
         _persons[index].name = name;
         _persons[index].email = email;
@@ -87,26 +93,37 @@ contract CertificateV1 {
         _mpPersonDetails[_persons[index].id] = _persons[index];
     }
 
-    function removePerson(uint id) public onlyAdmin isPersonExist(id) {
+    function removePerson(uint id) public onlyAdmin {
         uint index = getIndexPersonById(id);
         delete _mpPersonDetails[_persons[index].id];
-        delete _persons[index];
+        _persons[index] = _persons[_persons.length - 1];
+        _persons.pop();
     }
 
-    function _isPersonExist(uint idPerson) internal view returns(bool) {
-        for(uint i = 0; i < _persons.length; i++) {
-            if(_persons[i].id == idPerson)
-                return true;
-        }
+    function _isPersonExist(uint personId) internal view returns(bool) {
+        if(_mpPersonDetails[personId].id > 0)
+            return true;
         return false;
     }
 
-    function getIndexPersonById(uint id) internal view onlyAdmin isPersonExist(id) returns(uint) {
+    function getIndexPersonById(uint id) internal view returns(uint) {
         for(uint i = 0; i < _persons.length; i++) {
             if(_persons[i].id == id)
                 return i;
         }
-        revert("No person by id!");
+        revert("Not found person by id!");
+    }
+
+    function getLengthListPerson() public view returns (uint) {
+        return _persons.length;
+    }
+
+    function getListPerson() public view returns (Person[] memory) {
+        return _persons;
+    }
+
+    function getPersonById(uint id) public view onlyAdmin returns (Person memory) {
+        return _mpPersonDetails[id];
     }
 
     // Admin
@@ -116,26 +133,39 @@ contract CertificateV1 {
         _mpAdminDetails[_idAdminCount] = _newAdmin;
     }
 
-    function updateAdmin(uint id, string memory name, address addr) public onlyOwner isAdminExist(id) {
-        uint index = getIndexAdminById(id);
+    function updateAdmin(uint id, string memory name, address addr) public onlyOwner {
+        uint index = _getIndexAdminById(id);
         _admins[index].name = name;
         _admins[index].addr = addr;
 
         _mpAdminDetails[_admins[index].id] = _admins[index];
     }
 
-    function removeAdmin(uint id) public onlyOwner isAdminExist(id) {
-        uint index = getIndexAdminById(id);
+    function removeAdmin(uint id) public onlyOwner {
+        uint index = _getIndexAdminById(id);
         delete _mpAdminDetails[_admins[index].id];
-        delete _admins[index];
+        _admins[index] = _admins[_admins.length - 1];
+        _admins.pop();
     }
 
-    function getIndexAdminById(uint id) internal view onlyOwner isAdminExist(id) returns(uint) {
+    function _getIndexAdminById(uint id) internal view returns(uint) {
         for(uint i = 0; i < _admins.length; i++) {
             if(_admins[i].id == id)
                 return i;
         }
-        revert("No admin by id!");
+        revert("Not found admin by id!");
+    }
+
+    function getLengthListAdmin() public view onlyOwner returns (uint) {
+        return _admins.length;
+    }
+
+    function getListAdmin() public view onlyOwner returns (Admin[] memory) {
+        return (_admins);
+    }
+
+    function getAdminById(uint id) public view onlyOwner returns (Admin memory) {
+        return _mpAdminDetails[id];
     }
 
     function _isAdmin() internal view returns(bool) {
@@ -146,72 +176,136 @@ contract CertificateV1 {
         return false;
     }
 
-    function _isAdminExist(uint id) internal view returns(bool) {
-        for(uint i = 0; i < _admins.length; i++) {
-            if(_admins[i].id == id)
-                return true;
-        }
-        return false;
-    }
-
     // Certificate for person
-    function addCertificateOfPerson(uint idPerson, string memory nameCertificate, string memory linkCertificate) public onlyOwner isPersonExist(idPerson) {
-        Certificate memory _newCertificate = Certificate(++_idCertificateCount, nameCertificate, linkCertificate);
+    function addCertificateOfPerson(uint personId, string memory nameCertificate, string memory linkCertificate) public onlyAdmin isPersonExist(personId) {
+        Certificate memory _newCertificate = Certificate(++_certificateIdCount, nameCertificate, linkCertificate);
         _certificates.push(_newCertificate);
 
-        uint index = getIndexPersonById(idPerson);
+        uint index = getIndexPersonById(personId);
         _mpCertificateOfPersons[_persons[index].id].push(_newCertificate);
+
+        _mpCertificateIdToPersonId[_newCertificate.id] = personId;
     }
 
-    function updateCertificateOfPerson(uint idPerson, uint idCertificate, string memory nameCertificate, string memory linkCertificate)
-    public onlyOwner isPersonExist(idPerson) {
-        uint index = getIndexPersonById(idPerson);
-        require(_mpCertificateOfPersons[_persons[index].id].length > 0, "Person hasn't certificate!");
-        for(uint i = 0; i < _mpCertificateOfPersons[_persons[index].id].length; i++) {
-            if(_mpCertificateOfPersons[_persons[index].id][i].id == idCertificate) {
-                _mpCertificateOfPersons[_persons[index].id][i].name = nameCertificate;
-                _mpCertificateOfPersons[_persons[index].id][i].link = linkCertificate;
+    function updateCertificateOfPerson(uint certificateId, string memory nameCertificate, string memory linkCertificate) public onlyAdmin {
+        uint personId = _mpCertificateIdToPersonId[certificateId];
+        require(personId > 0, "Person hasn't this certificate by certificateId");
+        require(_mpCertificateOfPersons[personId].length > 0, "Certificate hasn't person!");
+
+        updateCertificate(certificateId, nameCertificate, linkCertificate);
+
+        for(uint i = 0; i < _mpCertificateOfPersons[personId].length; i++) {
+            if(_mpCertificateOfPersons[personId][i].id == certificateId) {
+                _mpCertificateOfPersons[personId][i].name = nameCertificate;
+                _mpCertificateOfPersons[personId][i].link = linkCertificate;
                 return;
             }
         }
     }
 
-    function removeCertificateOfPersonByParam(uint idPerson, uint idCertificate) public isPersonExist(idPerson) onlyOwner {
-        uint index = getIndexPersonById(idPerson);
-        require(_mpCertificateOfPersons[_persons[index].id].length > 0, "Person hasn't certificate!");
-        for(uint i = 0; i < _mpCertificateOfPersons[_persons[index].id].length; i++) {
-            if(_mpCertificateOfPersons[_persons[index].id][i].id == idCertificate) {
-                delete _mpCertificateOfPersons[_persons[index].id][i];
-                removeCertificate(idCertificate);
+    function removeCertificateOfPerson(uint certificateId) public onlyAdmin {
+        uint personId = _mpCertificateIdToPersonId[certificateId];
+        require(personId > 0, "Person hasn't this certificate by certificateId");
+        require(_mpCertificateOfPersons[personId].length > 0, "Certificate hasn't person!");
+
+        removeCertificate(certificateId);
+
+        delete _mpCertificateIdToPersonId[certificateId];
+
+        uint lastIndex = _mpCertificateOfPersons[personId].length - 1;
+        for(uint i = 0; i < _mpCertificateOfPersons[personId].length; i++) {
+            if(_mpCertificateOfPersons[personId][i].id == certificateId) {
+                _mpCertificateOfPersons[personId][i] = _mpCertificateOfPersons[personId][lastIndex];
+                _mpCertificateOfPersons[personId].pop();
                 return;
             }
         }
+    }
+
+    function getPersonByCertificateId(uint certificateId) public view onlyAdmin returns (Person memory) {
+        uint personId = _mpCertificateIdToPersonId[certificateId];
+        require(personId > 0, "No person of this certificate by certificateId");
+        require(_mpCertificateOfPersons[personId].length > 0, "Certificate hasn't person!");
+        return _mpPersonDetails[personId];
+    }
+
+    function getListCertificateOfPersonByPersonId(uint personId) public view onlyAdmin returns (Certificate[] memory) {
+        require(_mpCertificateOfPersons[personId].length > 0, "Person hasn't certificate!");
+        return _mpCertificateOfPersons[personId];
     }
 
     // Certificate
     function createCertificate(string memory name, string memory link) public onlyOwner {
-        Certificate memory _newCertificate = Certificate(++_idCertificateCount, name, link);
+        Certificate memory _newCertificate = Certificate(++_certificateIdCount, name, link);
         _certificates.push(_newCertificate);
         _mpCertificateDetails[_newCertificate.id] = _newCertificate;
     }
 
-    function updateCertificate(uint id, string memory name, string memory link) public onlyOwner {
-        uint index = getIndexCertificateById(id);
-        _certificates[index].name = name;
-        _certificates[index].link = link;
+    function updateCertificate(uint certificateId, string memory nameCertificate, string memory linkCertificate) public onlyOwner {
+        uint index = _getIndexCertificateById(certificateId);
+        _certificates[index].name = nameCertificate;
+        _certificates[index].link = linkCertificate;
+
+        _mpCertificateDetails[certificateId] = _certificates[index];
     }
 
-    function removeCertificate(uint id) public onlyOwner {
-        uint index = getIndexCertificateById(id);
-        delete _certificates[index];
+    function removeCertificate(uint certificateId) public onlyOwner {
+        uint index = _getIndexCertificateById(certificateId);
+        _certificates[index] = _certificates[_certificates.length - 1];
+        _certificates.pop();
+
+        delete _mpCertificateDetails[certificateId];
     }
 
-    function getIndexCertificateById(uint id) internal view onlyOwner returns (uint) {
+    function _getIndexCertificateById(uint id) internal view onlyOwner returns (uint) {
         require(_certificates.length > 0, "No hasn't certificate");
         for(uint i = 0; i < _certificates.length; i++) {
             if(_certificates[i].id == id) 
                 return i;
         }
-        revert("No certificate by id!");
+        revert("Not found certificate by id!");
+    }
+
+    function getLengthListCertificate() public view onlyOwner returns (uint) {
+        return _certificates.length;
+    }
+
+    function getAllCertificate() public view onlyOwner returns (Certificate[] memory) {
+        require(_certificates.length > 0);
+        return _certificates;
+    }
+
+    // tranfer certificate from certificateId to persom
+    function tranferCertificateToPerson(uint certificateId, uint personId) public onlyOwner isPersonExist(personId) checkCertificateExistOfPerson(certificateId) {
+        require(_mpCertificateDetails[certificateId].id > 0, "Not found certificate by certificateId");
+        // get information certificate by certificateId
+        Certificate memory certificate = _mpCertificateDetails[certificateId];
+        _mpCertificateOfPersons[personId].push(certificate);
+
+        _mpCertificateIdToPersonId[certificateId] = personId;
+    }
+
+    // tranfer many certificate from certificateId to persom
+    function tranferManyCertificateToPerson(uint[] memory certificateIds, uint personId) public onlyOwner isPersonExist(personId) {
+        require(certificateIds.length > 0, "Params false!");
+        require(_checkCertificatesExist(certificateIds), "Not found certificate or certificate has been used");
+        for (uint i = 0; i < certificateIds.length; i++) {
+            tranferCertificateToPerson(certificateIds[i], personId);
+        }
+    }
+
+    function _checkCertificatesExist(uint[] memory certificateIds) internal view onlyOwner returns (bool) {
+        for (uint i = 0; i < certificateIds.length; i++) {
+            uint certificateId = certificateIds[i];
+            if(_mpCertificateDetails[certificateId].id == 0 || !_checkCertificateExistOfPerson(certificateId))
+                return false;
+        }
+        return true;
+    }
+
+    function _checkCertificateExistOfPerson(uint certificateId) internal view onlyOwner returns (bool) {
+        if(_mpCertificateIdToPersonId[certificateId] > 0)
+            return false;
+        return true;
     }
 }
