@@ -2,6 +2,12 @@
 pragma solidity >= 0.7.0 < 0.9.0;
 
 contract SellLaptopProducts {
+    struct Admin {
+        uint id;
+        string name;
+        address addr;
+    }
+
     struct Item {
         uint id;
         string name;
@@ -18,10 +24,13 @@ contract SellLaptopProducts {
         address addr;
     }
 
-    struct Admin {
+    struct Order {
         uint id;
-        string name;
-        address addr;
+        uint customerId;
+        uint itemId;
+        uint quantity;
+        uint priceToPay;
+        Status status;
     }
 
     Admin[] internal _admins;
@@ -31,20 +40,63 @@ contract SellLaptopProducts {
     mapping (uint => Item) internal _mpItemDetails;
 
     Customer[] internal _customers;
-    mapping (uint => Customer) _mpCustomerDetails;
+    mapping (uint => Customer) internal _mpCustomerDetails;
+    mapping (address => Customer) internal _mpCustomers;
 
+    Order[] internal _orders;
+    // orderId => Order
+    mapping (uint => Order) internal _mpOrderDetails;
+    // customerId => Order[]
+    mapping (uint => Order[]) internal _mpOrdersCustomer;
+
+    enum Status {Bought, Complete}
     uint private _adminIdCount;
     uint private _itemIdCount;
     uint private _customerIdCount;
+    uint private _orderIdCount;
+    address private _receiverValue;
+
+    event boughtSuccess(Order);
+    event transferSuccess(Order);
+    event completeSuccess(Order);
+
+    constructor() {
+        _receiverValue = msg.sender;
+    }
+
+    modifier onlyReceiver {
+        require(_receiverValue == msg.sender, "No ReceiverValue!");
+        _;
+    }
+
+    modifier isExistItem(uint id) {
+        require(_isExistItemById(id), "Not found item by id!");
+        _;
+    }
+
+    modifier isExistAddress(address addr, uint id) {
+        require(!_isExistAddressCustomerByAddress(addr, id), "Address has been used!");
+        _;
+    }
+
+    modifier isExistOrderId(uint orderId) {
+        require(_mpOrderDetails[orderId].id > 0, "Not found order by id!");
+        _;
+    }
+    
+    modifier isExistCustomer(address addr) {
+        require(_mpCustomers[addr].id > 0, "No customer!");
+        _;
+    }
 
     modifier onlyAdmin() {
         require(_isAdmin(), "No permission!");
         _;
     }
 
-    modifier isExistAddress(address addr) {
-        require(!_isExistAddressCustomerByAddress(addr, 0), "Address has been used!");
-        _;
+    function updateReceiver(address to) public onlyReceiver {
+        require(_receiverValue != to, "Receiver already exist!");
+        _receiverValue = to;
     }
 
     // admin
@@ -75,10 +127,6 @@ contract SellLaptopProducts {
                 return i;
         }
         revert("Not found admin by id!");
-    }
-
-    function nListAdmin() public view returns (uint) {
-        return _admins.length;
     }
 
     function getListAdmin() public view returns (Admin[] memory) {
@@ -134,26 +182,37 @@ contract SellLaptopProducts {
         revert("Not found item by id!");
     }
 
+    function _isExistItemById(uint id) internal view returns (bool) {
+        for (uint i = 0; i < _items.length; i++) {
+            if(_items[i].id == id)
+                return true;
+        }
+        return false;
+    }
+
     function getListItem() public view onlyAdmin returns (Item[] memory) {
         return _items;
     }
 
+    function getItemById(uint id) public view onlyAdmin isExistItem(id) returns (Item memory) {
+        return _mpItemDetails[id];
+    }
+
     // customer
-    function addCustomer (string memory name, string memory phone, address addr) public isExistAddress(addr) {
+    function addCustomer (string memory name, string memory phone, address addr) public isExistAddress(addr, 0) {
         Customer memory newCustomer = Customer(++_customerIdCount, name, phone, addr);
         _customers.push(newCustomer);
         
-        _mpCustomerDetails[_customerIdCount] = newCustomer;
+        _mpCustomerDetails[_customerIdCount] = _mpCustomers[addr] = newCustomer;
     }
 
-    function updateCustomer (uint id, string memory name, string memory phone, address addr) public {
+    function updateCustomer (uint id, string memory name, string memory phone, address addr) public isExistAddress(addr, id) {
         uint index = _getIndexCustomerById(id);
-        require(!_isExistAddressCustomerByAddress(addr, id), "Address has been used!");
         _customers[index].name = name;
         _customers[index].phone = phone;
         _customers[index].addr = addr;
 
-        _mpCustomerDetails[id] = _customers[index];
+        _mpCustomerDetails[id] = _mpCustomers[addr] = _customers[index];
     }
 
     function removeCustomer (uint id) public {
@@ -161,7 +220,22 @@ contract SellLaptopProducts {
         _customers[index] = _customers[_customers.length - 1];
         _customers.pop();
 
+        delete _mpCustomers[_mpCustomerDetails[id].addr];
         delete _mpCustomerDetails[id];
+
+        delete _mpOrdersCustomer[id];
+    }
+
+    function getCustomerById(uint id) public view returns (Customer memory) {
+        return _mpCustomerDetails[id];
+    }
+
+    function getListCustomer() public view returns (Customer[] memory) {
+        return _customers;
+    }
+
+    function getBalanceOfCustomerByAddress(address addr) public view returns (uint) {
+        return addr.balance;
     }
 
     function _getIndexCustomerById(uint id) internal view returns (uint) {
@@ -174,7 +248,6 @@ contract SellLaptopProducts {
     }
   
     function _isExistAddressCustomerByAddress(address addr, uint id) internal view returns (bool) {
-        require(_customers.length > 0, "No list customers!");
         for (uint i = 0; i < _customers.length; i++) {
             if (id > 0) {
                 if(_customers[i].addr == addr && _customers[i].id != id)
@@ -184,5 +257,88 @@ contract SellLaptopProducts {
                 return true;
         }
         return false;
+    }
+
+    // Buy Item
+    function buyItem(uint itemId, uint quantity) payable public isExistCustomer(msg.sender) isExistItem(itemId) {
+        require(msg.value > 0, "Balance in wallet must be > 0!");
+        require(_mpItemDetails[itemId].itemLeft >= quantity, "Invalid quantity!");
+        uint priceToPay = _mpItemDetails[itemId].pricePerItem * quantity;
+        require(msg.value >= priceToPay, "Insufficient wallet balance!");
+
+        payable(_receiverValue).transfer(priceToPay);
+
+        uint orderId = _createOrder(itemId, quantity, priceToPay, msg.sender);
+        emit boughtSuccess(_mpOrderDetails[orderId]);
+    }
+    
+    function transferItem(uint itemId, uint quantity, address customerAddr) public onlyAdmin isExistCustomer(customerAddr) isExistItem(itemId) {
+        require(_mpItemDetails[itemId].itemLeft >= quantity, "Invalid quantity!");
+
+        uint priceToPay = _mpItemDetails[itemId].pricePerItem * quantity;
+        uint orderId = _createOrder(itemId, quantity, priceToPay, customerAddr);
+        emit transferSuccess(_mpOrderDetails[orderId]);
+    }
+
+    function _createOrder(uint itemId, uint quantity, uint priceToPay, address customerAddr) internal returns (uint) {
+        uint customerId = _mpCustomers[customerAddr].id;
+        Order memory newOrder = Order(++_orderIdCount, customerId, itemId, quantity, priceToPay, Status.Bought);
+        _orders.push(newOrder);
+
+        _mpOrderDetails[_orderIdCount] = newOrder;
+        _mpOrdersCustomer[customerId].push(newOrder);
+
+        uint indexItem = _getIndexItemById(itemId);
+        _items[indexItem].itemLeft -= quantity;
+        _mpItemDetails[itemId] = _items[indexItem];
+        return newOrder.id;
+    }
+
+    function completeItem(uint orderId) public onlyAdmin isExistOrderId(orderId) {
+        Order memory order = _mpOrderDetails[orderId];
+
+        if(order.status == Status.Complete)
+            revert("Order has been status complete!");
+
+        uint customerId = order.customerId;
+        uint indexOrder = _getIndexOrderById(orderId);
+        uint indexOrderCus = _getIndexOrderCustomerByParams(customerId, orderId);
+
+        _orders[indexOrder].status = Status.Complete;
+        _mpOrderDetails[orderId] = _mpOrdersCustomer[customerId][indexOrderCus] = _orders[indexOrder];
+
+        emit completeSuccess(_orders[indexOrder]);
+    }
+
+    function _getIndexOrderCustomerByParams(uint customerId, uint orderId) internal view onlyAdmin returns (uint) {
+        for (uint i = 0; i < _mpOrdersCustomer[customerId].length; i++) {
+            if(_mpOrdersCustomer[customerId][i].id == orderId)
+                return i;
+        }
+        revert("Not found order customer by params!");
+    }
+
+    function _getIndexOrderCustomerById(uint customerId) internal view onlyAdmin returns (uint) {
+        for (uint i = 0; i < _mpOrdersCustomer[customerId].length; i++) {
+            if(_mpOrdersCustomer[customerId][i].customerId == customerId)
+                return i;
+        }
+        revert("Not found order customer by id!");
+    }
+
+    function _getIndexOrderById(uint id) internal view onlyAdmin returns (uint) {
+        for (uint i = 0; i < _orders.length; i++) {
+            if(_orders[i].id == id)
+                return i;
+        }
+        revert("Not found order customer by id!");
+    }
+
+    function getAllOrder() public view returns (Order[] memory) {
+        return _orders;
+    }
+
+    function getAllOrderCustomerById(uint id) public view returns (Order[] memory) {
+        return _mpOrdersCustomer[id];
     }
 }
