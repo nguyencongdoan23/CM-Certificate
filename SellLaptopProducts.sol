@@ -94,6 +94,11 @@ contract SellLaptopProducts {
         _;
     }
 
+    modifier onlyCustomer(address addr) {
+        require(msg.sender == addr, "No Customer!");
+        _;
+    }
+    
     function updateReceiver(address to) public onlyReceiver {
         require(_receiverValue != to, "Receiver already exist!");
         _receiverValue = to;
@@ -174,7 +179,7 @@ contract SellLaptopProducts {
         delete _mpItemDetails[id]; 
     }
 
-    function _getIndexItemById(uint id) internal view returns (uint) {
+    function _getIndexItemById(uint id) internal view onlyAdmin returns (uint) {
         for (uint i = 0; i < _items.length; i++) {
             if(_items[i].id == id)
                 return i;
@@ -182,7 +187,7 @@ contract SellLaptopProducts {
         revert("Not found item by id!");
     }
 
-    function _isExistItemById(uint id) internal view returns (bool) {
+    function _isExistItemById(uint id) internal view onlyAdmin returns (bool) {
         for (uint i = 0; i < _items.length; i++) {
             if(_items[i].id == id)
                 return true;
@@ -206,7 +211,8 @@ contract SellLaptopProducts {
         _mpCustomerDetails[_customerIdCount] = _mpCustomers[addr] = newCustomer;
     }
 
-    function updateCustomer (uint id, string memory name, string memory phone, address addr) public isExistAddress(addr, id) {
+    function updateCustomer (uint id, string memory name, string memory phone, address addr) 
+    public onlyCustomer(addr) isExistAddress(addr, id) {
         uint index = _getIndexCustomerById(id);
         _customers[index].name = name;
         _customers[index].phone = phone;
@@ -215,7 +221,7 @@ contract SellLaptopProducts {
         _mpCustomerDetails[id] = _mpCustomers[addr] = _customers[index];
     }
 
-    function removeCustomer (uint id) public {
+    function removeCustomer (uint id) public onlyAdmin {
         uint index = _getIndexCustomerById(id);
         _customers[index] = _customers[_customers.length - 1];
         _customers.pop();
@@ -227,19 +233,19 @@ contract SellLaptopProducts {
     }
 
     function getCustomerById(uint id) public view returns (Customer memory) {
+        require(msg.sender == _mpCustomerDetails[id].addr || _isAdmin(), "No permission!");
         return _mpCustomerDetails[id];
     }
 
-    function getListCustomer() public view returns (Customer[] memory) {
+    function getListCustomer() public view onlyAdmin returns (Customer[] memory) {
         return _customers;
     }
 
-    function getBalanceOfCustomerByAddress(address addr) public view returns (uint) {
+    function getBalanceOfCustomerByAddress(address addr) public view onlyCustomer(addr) returns (uint) {
         return addr.balance;
     }
 
     function _getIndexCustomerById(uint id) internal view returns (uint) {
-        require(_customers.length > 0, "No list customers!");
         for (uint i = 0; i < _customers.length; i++) {
             if(_customers[i].id == id) 
                 return i;
@@ -272,7 +278,8 @@ contract SellLaptopProducts {
         emit boughtSuccess(_mpOrderDetails[orderId]);
     }
     
-    function transferItem(uint itemId, uint quantity, address customerAddr) public onlyAdmin isExistCustomer(customerAddr) isExistItem(itemId) {
+    function transferItem(uint itemId, uint quantity, address customerAddr) 
+    public onlyAdmin isExistCustomer(customerAddr) isExistItem(itemId) {
         require(_mpItemDetails[itemId].itemLeft >= quantity, "Invalid quantity!");
 
         uint priceToPay = _mpItemDetails[itemId].pricePerItem * quantity;
@@ -307,7 +314,7 @@ contract SellLaptopProducts {
         _orders[indexOrder].status = Status.Complete;
         _mpOrderDetails[orderId] = _mpOrdersCustomer[customerId][indexOrderCus] = _orders[indexOrder];
 
-        emit completeSuccess(_orders[indexOrder]);
+        emit completeSuccess(_orders[indexOrder]); 
     }
 
     function _getIndexOrderCustomerByParams(uint customerId, uint orderId) internal view onlyAdmin returns (uint) {
@@ -318,27 +325,20 @@ contract SellLaptopProducts {
         revert("Not found order customer by params!");
     }
 
-    function _getIndexOrderCustomerById(uint customerId) internal view onlyAdmin returns (uint) {
-        for (uint i = 0; i < _mpOrdersCustomer[customerId].length; i++) {
-            if(_mpOrdersCustomer[customerId][i].customerId == customerId)
-                return i;
-        }
-        revert("Not found order customer by id!");
-    }
-
     function _getIndexOrderById(uint id) internal view onlyAdmin returns (uint) {
         for (uint i = 0; i < _orders.length; i++) {
             if(_orders[i].id == id)
                 return i;
         }
-        revert("Not found order customer by id!");
+        revert("Not found order by id!");
     }
 
-    function getAllOrder() public view returns (Order[] memory) {
+    function getAllOrder() public view onlyAdmin returns (Order[] memory) {
         return _orders;
     }
 
     function getAllOrderCustomerById(uint id) public view returns (Order[] memory) {
+        require(msg.sender == _mpCustomerDetails[id].addr || _isAdmin(), "No permission!");
         return _mpOrdersCustomer[id];
     }
 }
