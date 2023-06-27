@@ -179,7 +179,7 @@ contract SellLaptopProducts {
         delete _mpItemDetails[id]; 
     }
 
-    function _getIndexItemById(uint id) internal view onlyAdmin returns (uint) {
+    function _getIndexItemById(uint id) internal view returns (uint) {
         for (uint i = 0; i < _items.length; i++) {
             if(_items[i].id == id)
                 return i;
@@ -187,7 +187,7 @@ contract SellLaptopProducts {
         revert("Not found item by id!");
     }
 
-    function _isExistItemById(uint id) internal view onlyAdmin returns (bool) {
+    function _isExistItemById(uint id) internal view returns (bool) {
         for (uint i = 0; i < _items.length; i++) {
             if(_items[i].id == id)
                 return true;
