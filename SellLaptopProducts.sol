@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >= 0.7.0 < 0.9.0;
+pragma solidity ^0.8.0;
 
-contract SellLaptopProducts {
+contract SellProduct {
     struct Admin {
         uint id;
         string name;
@@ -49,6 +49,8 @@ contract SellLaptopProducts {
     // customerId => Order[]
     mapping (uint => Order[]) internal _mpOrdersCustomer;
 
+    address internal _owner;
+
     enum Status {Bought, Complete}
     uint private _adminIdCount;
     uint private _itemIdCount;
@@ -61,7 +63,7 @@ contract SellLaptopProducts {
     event completeSuccess(Order);
 
     constructor() {
-        _receiverValue = msg.sender;
+        _receiverValue = _owner = msg.sender;
     }
 
     modifier onlyReceiver {
@@ -90,7 +92,7 @@ contract SellLaptopProducts {
     }
 
     modifier onlyAdmin() {
-        require(_isAdmin(), "No permission!");
+        require(_isAdmin() || msg.sender == _owner, "No permission!");
         _;
     }
 
@@ -104,14 +106,22 @@ contract SellLaptopProducts {
         _receiverValue = to;
     }
 
+    function getReceiver() public view returns(address) {
+        return _receiverValue;
+    }
+
+    function getOwner() public view returns(address) {
+        return _owner;
+    }
+
     // admin
-    function addAdmin(string memory name, address addr) public {
+    function addAdmin(string memory name, address addr) public onlyAdmin {
         Admin memory _newAdmin = Admin(++_adminIdCount, name, addr);
         _admins.push(_newAdmin);
         _mpAdminDetails[_adminIdCount] = _newAdmin;
     }
 
-    function updateAdmin(uint id, string memory name, address addr) public {
+    function updateAdmin(uint id, string memory name, address addr) public onlyAdmin {
         uint index = _getIndexAdminById(id);
         _admins[index].name = name;
         _admins[index].addr = addr;
@@ -134,11 +144,11 @@ contract SellLaptopProducts {
         revert("Not found admin by id!");
     }
 
-    function getListAdmin() public view returns (Admin[] memory) {
+    function getListAdmin() public view onlyAdmin returns (Admin[] memory) {
         return _admins;
     }
 
-    function getAdminById(uint id) public view returns (Admin memory) {
+    function getAdminById(uint id) public view onlyAdmin returns (Admin memory) {
         return _mpAdminDetails[id];
     }
 
@@ -195,11 +205,11 @@ contract SellLaptopProducts {
         return false;
     }
 
-    function getListItem() public view onlyAdmin returns (Item[] memory) {
+    function getListItem() public view returns (Item[] memory) {
         return _items;
     }
 
-    function getItemById(uint id) public view onlyAdmin isExistItem(id) returns (Item memory) {
+    function getItemById(uint id) public view isExistItem(id) returns (Item memory) {
         return _mpItemDetails[id];
     }
 
@@ -212,7 +222,8 @@ contract SellLaptopProducts {
     }
 
     function updateCustomer (uint id, string memory name, string memory phone, address addr) 
-    public onlyCustomer(addr) isExistAddress(addr, id) {
+    public isExistAddress(addr, id) {
+        require(msg.sender == _mpCustomerDetails[id].addr || _isAdmin(), "No permission!");
         uint index = _getIndexCustomerById(id);
         _customers[index].name = name;
         _customers[index].phone = phone;
@@ -301,7 +312,7 @@ contract SellLaptopProducts {
         return newOrder.id;
     }
 
-    function completeItem(uint orderId) public onlyAdmin isExistOrderId(orderId) {
+    function completeOrder(uint orderId) public onlyAdmin isExistOrderId(orderId) {
         Order memory order = _mpOrderDetails[orderId];
 
         if(order.status == Status.Complete)
